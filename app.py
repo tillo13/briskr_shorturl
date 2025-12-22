@@ -294,7 +294,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>bris<span>.kr</span></h1>
-        <p class="tagline">Getting <span>{{ client_ip }}</span> there brisker!</p>
+        <p class="tagline">Making links brisker for: <span>{{ client_ip }}</span>!</p>
         
         <form method="POST" action="/shorten">
             <input type="url" name="url" placeholder="Paste long URL here..." required>
