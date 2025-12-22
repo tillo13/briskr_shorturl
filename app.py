@@ -6,7 +6,6 @@ Schema: briskr.urls
 import os
 import string
 import random
-from functools import wraps
 
 from flask import Flask, request, redirect, jsonify, render_template_string
 from google.cloud import secretmanager
@@ -22,8 +21,9 @@ app = Flask(__name__)
 GCP_SECRET_PROJECT = "kumori-404602"
 BASE_URL = os.environ.get("BASE_URL", "https://bris.kr")
 
-# Admin key from environment
-ADMIN_KEY = os.environ.get("ADMIN_KEY", "change_this_key_123")
+# Short code settings - start small, grow as needed
+MIN_CODE_LENGTH = 2  # Start with 2 chars (a9, bX, etc.)
+MAX_CODE_LENGTH = 6  # Max length if all shorter codes used
 
 # ============================================================================
 # DATABASE HELPERS
@@ -59,10 +59,33 @@ def get_db_connection():
 # URL SHORTENING LOGIC
 # ============================================================================
 
-def generate_short_code(length: int = 6) -> str:
+def generate_short_code(length: int = 2) -> str:
     """Generate a random short code."""
-    chars = string.ascii_letters + string.digits
+    # Use lowercase + digits for cleaner URLs
+    chars = string.ascii_lowercase + string.digits
     return ''.join(random.choices(chars, k=length))
+
+
+def find_available_code() -> str:
+    """Find an available short code, starting with shortest possible."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            for length in range(MIN_CODE_LENGTH, MAX_CODE_LENGTH + 1):
+                # Try a few random codes at this length
+                for _ in range(10):
+                    code = generate_short_code(length)
+                    cur.execute(
+                        "SELECT 1 FROM briskr.urls WHERE short_code = %s",
+                        (code,)
+                    )
+                    if not cur.fetchone():
+                        return code
+            
+            # Fallback: generate longer code
+            return generate_short_code(MAX_CODE_LENGTH)
+    finally:
+        conn.close()
 
 
 def create_short_url(long_url: str, custom_code: str = None) -> dict:
@@ -70,17 +93,17 @@ def create_short_url(long_url: str, custom_code: str = None) -> dict:
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            short_code = custom_code or generate_short_code()
-            
-            # Check if code exists
-            cur.execute(
-                "SELECT short_code FROM briskr.urls WHERE short_code = %s",
-                (short_code,)
-            )
-            if cur.fetchone():
-                if custom_code:
+            if custom_code:
+                # Check if custom code exists
+                cur.execute(
+                    "SELECT short_code FROM briskr.urls WHERE short_code = %s",
+                    (custom_code.lower(),)
+                )
+                if cur.fetchone():
                     return {"error": f"Code '{custom_code}' already exists"}
-                short_code = generate_short_code(8)
+                short_code = custom_code.lower()
+            else:
+                short_code = find_available_code()
             
             # Insert new URL
             cur.execute("""
@@ -113,7 +136,7 @@ def get_long_url(short_code: str) -> str | None:
                     last_clicked = CURRENT_TIMESTAMP
                 WHERE short_code = %s
                 RETURNING long_url
-            """, (short_code,))
+            """, (short_code.lower(),))
             
             result = cur.fetchone()
             conn.commit()
@@ -139,28 +162,16 @@ def get_stats() -> list:
         conn.close()
 
 
-# ============================================================================
-# AUTH HELPER
-# ============================================================================
-
-def check_admin_key() -> bool:
-    """Check if admin key is valid from query param, form data, or header."""
-    key = (
-        request.args.get('key') or 
-        request.form.get('key') or 
-        request.headers.get('X-Admin-Key')
-    )
-    return key == ADMIN_KEY
-
-
-def require_admin(f):
-    """Simple admin key check."""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not check_admin_key():
-            return jsonify({"error": "Unauthorized"}), 401
-        return f(*args, **kwargs)
-    return decorated
+def get_total_urls() -> int:
+    """Get total number of URLs."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) as count FROM briskr.urls")
+            result = cur.fetchone()
+            return result['count'] if result else 0
+    finally:
+        conn.close()
 
 
 # ============================================================================
@@ -198,26 +209,28 @@ HTML_TEMPLATE = """
             margin-top: 2rem; padding: 1.5rem; 
             background: #1a1a1a; border-radius: 8px;
         }
-        .result a { color: #4ade80; word-break: break-all; }
+        .result a { color: #4ade80; word-break: break-all; font-size: 1.25rem; }
         .stats { margin-top: 3rem; }
+        .stats h2 { margin-bottom: 1rem; font-size: 1.25rem; color: #888; }
         .stats table { width: 100%; border-collapse: collapse; }
         .stats th, .stats td { 
             padding: 0.75rem; text-align: left; 
             border-bottom: 1px solid #333;
         }
         .stats td { font-family: monospace; font-size: 0.875rem; }
+        .stats a { color: #4ade80; }
         .clicks { color: #4ade80; }
         .error { color: #f87171; }
+        .info { color: #666; font-size: 0.875rem; margin-top: 2rem; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>bris<span>.kr</span></h1>
         
-        <form method="POST" action="/shorten?key={{ key }}">
+        <form method="POST" action="/shorten">
             <input type="url" name="url" placeholder="Paste long URL here..." required>
-            <input type="text" name="code" placeholder="Custom code (optional)">
-            <input type="hidden" name="key" value="{{ key }}">
+            <input type="text" name="code" placeholder="Custom code (optional)" maxlength="20">
             <button type="submit">Shorten</button>
         </form>
         
@@ -234,19 +247,21 @@ HTML_TEMPLATE = """
         
         {% if stats %}
         <div class="stats">
-            <h2>Your URLs</h2>
+            <h2>Recent URLs ({{ total_urls }} total)</h2>
             <table>
                 <tr><th>Code</th><th>Destination</th><th>Clicks</th></tr>
                 {% for url in stats %}
                 <tr>
                     <td><a href="/{{ url.short_code }}">{{ url.short_code }}</a></td>
-                    <td>{{ url.long_url[:50] }}{% if url.long_url|length > 50 %}...{% endif %}</td>
+                    <td>{{ url.long_url[:40] }}{% if url.long_url|length > 40 %}...{% endif %}</td>
                     <td class="clicks">{{ url.click_count }}</td>
                 </tr>
                 {% endfor %}
             </table>
         </div>
         {% endif %}
+        
+        <p class="info">Free URL shortener. No tracking, no ads.</p>
     </div>
 </body>
 </html>
@@ -255,42 +270,48 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def home():
-    """Home page - show form and stats if admin."""
-    key = request.args.get('key', '')
-    stats = None
-    if key == ADMIN_KEY:
-        try:
-            stats = get_stats()
-        except Exception as e:
-            print(f"Error getting stats: {e}")
-    return render_template_string(HTML_TEMPLATE, key=key, result=None, stats=stats)
+    """Home page - show form and recent URLs."""
+    try:
+        stats = get_stats()
+        total_urls = get_total_urls()
+    except Exception as e:
+        print(f"Error getting stats: {e}")
+        stats = []
+        total_urls = 0
+    return render_template_string(HTML_TEMPLATE, result=None, stats=stats, total_urls=total_urls)
 
 
 @app.route("/shorten", methods=["POST"])
-@require_admin
 def shorten():
     """Create new short URL."""
-    long_url = request.form.get('url')
+    long_url = request.form.get('url', '').strip()
     custom_code = request.form.get('code', '').strip() or None
-    key = request.args.get('key') or request.form.get('key', '')
     
     if not long_url:
-        return render_template_string(HTML_TEMPLATE, key=key, 
-                                      result={"error": "URL is required"}, stats=None)
+        return render_template_string(HTML_TEMPLATE, 
+                                      result={"error": "URL is required"}, 
+                                      stats=[], total_urls=0)
     
+    # Ensure URL has protocol
     if not long_url.startswith(('http://', 'https://')):
         long_url = 'https://' + long_url
     
     result = create_short_url(long_url, custom_code)
-    stats = get_stats()
     
-    return render_template_string(HTML_TEMPLATE, key=key, result=result, stats=stats)
+    try:
+        stats = get_stats()
+        total_urls = get_total_urls()
+    except:
+        stats = []
+        total_urls = 0
+    
+    return render_template_string(HTML_TEMPLATE, result=result, stats=stats, total_urls=total_urls)
 
 
 @app.route("/<short_code>")
 def redirect_url(short_code: str):
     """Redirect short URL to long URL."""
-    if short_code in ('favicon.ico', 'robots.txt'):
+    if short_code in ('favicon.ico', 'robots.txt', 'health', 'api'):
         return '', 404
     
     long_url = get_long_url(short_code)
@@ -320,12 +341,11 @@ def redirect_url(short_code: str):
 # ============================================================================
 
 @app.route("/api/shorten", methods=["POST"])
-@require_admin
 def api_shorten():
     """API endpoint for creating short URLs."""
     data = request.get_json() or {}
-    long_url = data.get('url')
-    custom_code = data.get('code')
+    long_url = data.get('url', '').strip()
+    custom_code = data.get('code', '').strip() or None
     
     if not long_url:
         return jsonify({"error": "URL is required"}), 400
@@ -338,30 +358,18 @@ def api_shorten():
 
 
 @app.route("/api/stats")
-@require_admin
 def api_stats():
     """API endpoint for getting stats."""
-    return jsonify(get_stats())
+    return jsonify({
+        "total_urls": get_total_urls(),
+        "recent": get_stats()
+    })
 
 
 @app.route("/health")
 def health():
     """Health check endpoint."""
     return jsonify({"status": "ok"}), 200
-
-
-@app.route("/debug")
-def debug():
-    """Debug endpoint to check config."""
-    key = request.args.get('key', '')
-    return jsonify({
-        "admin_key_set": bool(ADMIN_KEY),
-        "admin_key_length": len(ADMIN_KEY) if ADMIN_KEY else 0,
-        "admin_key_first5": ADMIN_KEY[:5] if ADMIN_KEY else None,
-        "received_key_first5": key[:5] if key else None,
-        "keys_match": key == ADMIN_KEY,
-        "env_admin_key_first5": os.environ.get("ADMIN_KEY", "")[:5]
-    })
 
 
 if __name__ == "__main__":
