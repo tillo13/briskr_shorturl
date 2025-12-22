@@ -6,10 +6,10 @@ Deployment script for bris.kr URL Shortener
 import subprocess
 import json
 import time
-import os
 import sys
 import random
 import string
+import select
 
 # Configuration
 EXPECTED_PROJECT_ID = "briskr"
@@ -141,24 +141,50 @@ def deploy_service():
     return True
 
 
+def prompt_with_timeout(prompt, timeout=5, default='y'):
+    """Prompt user with a timeout. Returns default if no response."""
+    print(f"{prompt} (auto-yes in {timeout}s): ", end='', flush=True)
+    
+    try:
+        # Unix/Mac: use select for timeout
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if ready:
+            response = sys.stdin.readline().strip().lower()
+            return response if response else default
+        else:
+            print(f"\n⏱️  No response, defaulting to '{default}'")
+            return default
+    except:
+        # Fallback for systems where select doesn't work on stdin
+        try:
+            response = input().strip().lower()
+            return response if response else default
+        except:
+            return default
+
+
 def main():
     check_gcloud_project()
     
     if not deploy_service():
         sys.exit(1)
     
-    # Prompt for logs
-    print("📋 Tail logs? [y/N]: ", end="")
-    try:
-        response = input().strip().lower()
-        if response in ('y', 'yes'):
+    # Prompt for logs with 5 second timeout, defaults to yes
+    print("📋 Tail logs? [Y/n]", end=' ')
+    response = prompt_with_timeout("", timeout=5, default='y')
+    
+    if response not in ('n', 'no'):
+        print("📋 Tailing logs... (Ctrl+C to stop)\n")
+        try:
             subprocess.run([
                 "gcloud", "app", "logs", "tail",
                 "--service", SERVICE_NAME,
                 "--project", EXPECTED_PROJECT_ID
             ])
-    except KeyboardInterrupt:
-        pass
+        except KeyboardInterrupt:
+            print("\n\n⏹️  Stopped tailing logs.")
+    else:
+        print(f"📋 Skipped. View logs anytime: gcloud app logs tail -s {SERVICE_NAME} --project {EXPECTED_PROJECT_ID}")
 
 
 if __name__ == "__main__":

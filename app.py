@@ -7,12 +7,17 @@ import os
 import string
 import random
 
-from flask import Flask, request, redirect, jsonify, render_template_string, url_for
+from flask import Flask, request, redirect, jsonify, render_template_string, url_for, g
+from werkzeug.middleware.proxy_fix import ProxyFix
 from google.cloud import secretmanager
 import psycopg
 from psycopg.rows import dict_row
 
 app = Flask(__name__)
+
+# Trust proxy headers (App Engine has 2 proxies in front)
+# This makes request.remote_addr return the real client IP
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2, x_proto=1, x_host=1)
 
 # ============================================================================
 # CONFIGURATION
@@ -56,6 +61,39 @@ def get_db_connection():
 
 
 # ============================================================================
+# IP ADDRESS HELPER
+# ============================================================================
+
+def get_client_ip() -> str:
+    """Get the real client IP address.
+    
+    With ProxyFix middleware, request.remote_addr should be correct.
+    Falls back to X-Forwarded-For header parsing if needed.
+    """
+    # ProxyFix should handle this, but let's be safe
+    if request.remote_addr and request.remote_addr != '127.0.0.1':
+        return request.remote_addr
+    
+    # Fallback: manually parse X-Forwarded-For
+    x_forwarded_for = request.headers.get('X-Forwarded-For')
+    if x_forwarded_for:
+        # First IP in the comma-separated list is the original client
+        ip = x_forwarded_for.split(',')[0].strip()
+        return ip
+    
+    return request.remote_addr or 'unknown'
+
+
+# Log IP on every request
+@app.before_request
+def log_request_info():
+    """Log client IP for every request."""
+    client_ip = get_client_ip()
+    g.client_ip = client_ip  # Store in flask g object for use in templates
+    print(f"📍 Request from IP: {client_ip} | Path: {request.path}")
+
+
+# ============================================================================
 # URL SHORTENING LOGIC
 # ============================================================================
 
@@ -84,7 +122,7 @@ def find_available_code() -> str:
         conn.close()
 
 
-def create_short_url(long_url: str, custom_code: str = None) -> dict:
+def create_short_url(long_url: str, custom_code: str = None, client_ip: str = None) -> dict:
     """Create a new short URL."""
     conn = get_db_connection()
     try:
@@ -101,13 +139,15 @@ def create_short_url(long_url: str, custom_code: str = None) -> dict:
                 short_code = find_available_code()
             
             cur.execute("""
-                INSERT INTO briskr.urls (short_code, long_url)
-                VALUES (%s, %s)
+                INSERT INTO briskr.urls (short_code, long_url, created_by_ip)
+                VALUES (%s, %s, %s)
                 RETURNING id, short_code, long_url, created_at
-            """, (short_code, long_url))
+            """, (short_code, long_url, client_ip))
             
             result = cur.fetchone()
             conn.commit()
+            
+            print(f"✅ Created short URL: {short_code} -> {long_url[:50]}... (IP: {client_ip})")
             
             return {
                 "short_url": f"{BASE_URL}/{result['short_code']}",
@@ -200,8 +240,9 @@ HTML_TEMPLATE = """
             min-height: 100vh; padding: 2rem;
         }
         .container { max-width: 600px; margin: 0 auto; }
-        h1 { font-size: 3rem; margin-bottom: 2rem; }
+        h1 { font-size: 3rem; margin-bottom: 0.5rem; }
         h1 span { color: #666; }
+        .ip-info { color: #666; font-size: 0.8rem; margin-bottom: 2rem; font-family: monospace; }
         form { display: flex; flex-direction: column; gap: 1rem; }
         input, button { 
             padding: 1rem; font-size: 1rem; border: none; border-radius: 8px;
@@ -235,6 +276,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <h1>bris<span>.kr</span></h1>
+        <p class="ip-info">Creating from: {{ client_ip }}</p>
         
         <form method="POST" action="/shorten">
             <input type="url" name="url" placeholder="Paste long URL here..." required>
@@ -305,7 +347,11 @@ def home():
         stats = []
         total_urls = 0
     
-    return render_template_string(HTML_TEMPLATE, result=result, stats=stats, total_urls=total_urls)
+    return render_template_string(HTML_TEMPLATE, 
+                                  result=result, 
+                                  stats=stats, 
+                                  total_urls=total_urls,
+                                  client_ip=g.client_ip)
 
 
 @app.route("/shorten", methods=["POST"])
@@ -313,6 +359,7 @@ def shorten():
     """Create new short URL and redirect (PRG pattern)."""
     long_url = request.form.get('url', '').strip()
     custom_code = request.form.get('code', '').strip() or None
+    client_ip = g.client_ip
     
     if not long_url:
         return redirect(url_for('home', error='URL is required'))
@@ -321,7 +368,7 @@ def shorten():
     if not long_url.startswith(('http://', 'https://')):
         long_url = 'https://' + long_url
     
-    result = create_short_url(long_url, custom_code)
+    result = create_short_url(long_url, custom_code, client_ip)
     
     if 'error' in result:
         return redirect(url_for('home', error=result['error']))
@@ -339,6 +386,7 @@ def redirect_url(short_code: str):
     long_url = get_long_url(short_code)
     
     if long_url:
+        print(f"🔗 Redirect: /{short_code} -> {long_url[:50]}...")
         return redirect(long_url, code=302)
     else:
         return render_template_string("""
@@ -368,6 +416,7 @@ def api_shorten():
     data = request.get_json() or {}
     long_url = data.get('url', '').strip()
     custom_code = data.get('code', '').strip() or None
+    client_ip = g.client_ip
     
     if not long_url:
         return jsonify({"error": "URL is required"}), 400
@@ -375,7 +424,7 @@ def api_shorten():
     if not long_url.startswith(('http://', 'https://')):
         long_url = 'https://' + long_url
     
-    result = create_short_url(long_url, custom_code)
+    result = create_short_url(long_url, custom_code, client_ip)
     return jsonify(result)
 
 
@@ -391,7 +440,7 @@ def api_stats():
 @app.route("/health")
 def health():
     """Health check endpoint."""
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "ok", "your_ip": g.client_ip}), 200
 
 
 if __name__ == "__main__":
