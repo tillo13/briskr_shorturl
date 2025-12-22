@@ -7,7 +7,7 @@ import os
 import string
 import random
 
-from flask import Flask, request, redirect, jsonify, render_template_string
+from flask import Flask, request, redirect, jsonify, render_template_string, url_for
 from google.cloud import secretmanager
 import psycopg
 from psycopg.rows import dict_row
@@ -61,7 +61,6 @@ def get_db_connection():
 
 def generate_short_code(length: int = 2) -> str:
     """Generate a random short code."""
-    # Use lowercase + digits for cleaner URLs
     chars = string.ascii_lowercase + string.digits
     return ''.join(random.choices(chars, k=length))
 
@@ -72,7 +71,6 @@ def find_available_code() -> str:
     try:
         with conn.cursor() as cur:
             for length in range(MIN_CODE_LENGTH, MAX_CODE_LENGTH + 1):
-                # Try a few random codes at this length
                 for _ in range(10):
                     code = generate_short_code(length)
                     cur.execute(
@@ -81,8 +79,6 @@ def find_available_code() -> str:
                     )
                     if not cur.fetchone():
                         return code
-            
-            # Fallback: generate longer code
             return generate_short_code(MAX_CODE_LENGTH)
     finally:
         conn.close()
@@ -94,7 +90,6 @@ def create_short_url(long_url: str, custom_code: str = None) -> dict:
     try:
         with conn.cursor() as cur:
             if custom_code:
-                # Check if custom code exists
                 cur.execute(
                     "SELECT short_code FROM briskr.urls WHERE short_code = %s",
                     (custom_code.lower(),)
@@ -105,7 +100,6 @@ def create_short_url(long_url: str, custom_code: str = None) -> dict:
             else:
                 short_code = find_available_code()
             
-            # Insert new URL
             cur.execute("""
                 INSERT INTO briskr.urls (short_code, long_url)
                 VALUES (%s, %s)
@@ -121,6 +115,20 @@ def create_short_url(long_url: str, custom_code: str = None) -> dict:
                 "long_url": result['long_url'],
                 "created_at": str(result['created_at'])
             }
+    finally:
+        conn.close()
+
+
+def get_url_by_code(short_code: str) -> dict | None:
+    """Get URL info by short code."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT short_code, long_url, click_count, created_at
+                FROM briskr.urls WHERE short_code = %s
+            """, (short_code.lower(),))
+            return cur.fetchone()
     finally:
         conn.close()
 
@@ -271,6 +279,24 @@ HTML_TEMPLATE = """
 @app.route("/")
 def home():
     """Home page - show form and recent URLs."""
+    result = None
+    error = request.args.get('error')
+    created = request.args.get('created')
+    
+    # Show result if we just created a URL (via redirect)
+    if created:
+        url_info = get_url_by_code(created)
+        if url_info:
+            result = {
+                "short_url": f"{BASE_URL}/{url_info['short_code']}",
+                "short_code": url_info['short_code'],
+                "long_url": url_info['long_url']
+            }
+    
+    # Show error if redirect included one
+    if error:
+        result = {"error": error}
+    
     try:
         stats = get_stats()
         total_urls = get_total_urls()
@@ -278,19 +304,18 @@ def home():
         print(f"Error getting stats: {e}")
         stats = []
         total_urls = 0
-    return render_template_string(HTML_TEMPLATE, result=None, stats=stats, total_urls=total_urls)
+    
+    return render_template_string(HTML_TEMPLATE, result=result, stats=stats, total_urls=total_urls)
 
 
 @app.route("/shorten", methods=["POST"])
 def shorten():
-    """Create new short URL."""
+    """Create new short URL and redirect (PRG pattern)."""
     long_url = request.form.get('url', '').strip()
     custom_code = request.form.get('code', '').strip() or None
     
     if not long_url:
-        return render_template_string(HTML_TEMPLATE, 
-                                      result={"error": "URL is required"}, 
-                                      stats=[], total_urls=0)
+        return redirect(url_for('home', error='URL is required'))
     
     # Ensure URL has protocol
     if not long_url.startswith(('http://', 'https://')):
@@ -298,14 +323,11 @@ def shorten():
     
     result = create_short_url(long_url, custom_code)
     
-    try:
-        stats = get_stats()
-        total_urls = get_total_urls()
-    except:
-        stats = []
-        total_urls = 0
+    if 'error' in result:
+        return redirect(url_for('home', error=result['error']))
     
-    return render_template_string(HTML_TEMPLATE, result=result, stats=stats, total_urls=total_urls)
+    # Redirect to home with created code (PRG pattern - no form resubmission)
+    return redirect(url_for('home', created=result['short_code']))
 
 
 @app.route("/<short_code>")
