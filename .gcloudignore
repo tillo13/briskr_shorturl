@@ -1,0 +1,38 @@
+# Virtual environments
+venv_briskr/
+venv/
+env/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environment files
+.env
+*.env
+.admin_key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Documentation (but NOT requirements.txt!)
+*.md
+
+# Setup/deploy scripts (not needed in production)
+deploy_setup.py
+requirements-deploy.txt
+setup_local.sh
+gcp_setup.sh
+gcloud_deploy.py
+git_push.sh

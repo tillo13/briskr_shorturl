@@ -1,0 +1,28 @@
+runtime: python312
+instance_class: F1
+
+entrypoint: gunicorn -b :$PORT app:app
+
+automatic_scaling:
+  min_instances: 0
+  max_instances: 2
+  target_cpu_utilization: 0.8
+
+# CRITICAL: Connect to kumori database
+beta_settings:
+  cloud_sql_instances: "kumori-404602:us-central1:kumori"
+
+env_variables:
+  BASE_URL: "https://bris.kr"
+  GAE_ENV: "standard"
+  ADMIN_KEY: qzR97XJf3BbBHSbybAPyGM8d5LfngKM_VmKK1Xt9wFk
+
+handlers:
+  - url: /favicon\.ico
+    static_files: static/favicon.ico
+    upload: static/favicon\.ico
+    secure: always
+  - url: /.*
+    script: auto
+    secure: always
+    redirect_http_response_code: 301

@@ -1,0 +1,26 @@
+# Virtual environments
+venv_briskr/
+venv/
+env/
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environment files
+.env
+*.env
+.admin_key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Local dev files
+*.log

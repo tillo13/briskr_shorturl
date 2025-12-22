@@ -1,0 +1,8 @@
+# Requirements for deploy_setup.py
+# Install with: pip install -r requirements-deploy.txt
+
+google-cloud-resource-manager>=1.10.0
+google-cloud-billing>=1.11.0
+google-cloud-service-usage>=1.8.0
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
