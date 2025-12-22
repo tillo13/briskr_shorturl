@@ -194,24 +194,40 @@ def get_long_url(short_code: str) -> str | None:
         conn.close()
 
 
-def get_stats() -> list:
-    """Get all URLs with stats."""
+def get_stats_by_ip(client_ip: str) -> list:
+    """Get URLs created by a specific IP address."""
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT short_code, long_url, click_count, created_at, last_clicked
                 FROM briskr.urls
+                WHERE created_by_ip = %s
                 ORDER BY created_at DESC
                 LIMIT 100
-            """)
+            """, (client_ip,))
             return cur.fetchall()
     finally:
         conn.close()
 
 
+def get_url_count_by_ip(client_ip: str) -> int:
+    """Get count of URLs created by a specific IP."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) as count FROM briskr.urls WHERE created_by_ip = %s",
+                (client_ip,)
+            )
+            result = cur.fetchone()
+            return result['count'] if result else 0
+    finally:
+        conn.close()
+
+
 def get_total_urls() -> int:
-    """Get total number of URLs."""
+    """Get total number of URLs in system."""
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -242,7 +258,8 @@ HTML_TEMPLATE = """
         .container { max-width: 600px; margin: 0 auto; }
         h1 { font-size: 3rem; margin-bottom: 0.5rem; }
         h1 span { color: #666; }
-        .ip-info { color: #666; font-size: 0.8rem; margin-bottom: 2rem; font-family: monospace; }
+        .tagline { color: #4ade80; font-size: 0.9rem; margin-bottom: 2rem; font-family: monospace; }
+        .tagline span { color: #888; }
         form { display: flex; flex-direction: column; gap: 1rem; }
         input, button { 
             padding: 1rem; font-size: 1rem; border: none; border-radius: 8px;
@@ -271,12 +288,13 @@ HTML_TEMPLATE = """
         .clicks { color: #4ade80; }
         .error { color: #f87171; }
         .info { color: #666; font-size: 0.875rem; margin-top: 2rem; }
+        .total { color: #555; font-size: 0.75rem; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>bris<span>.kr</span></h1>
-        <p class="ip-info">Creating from: {{ client_ip }}</p>
+        <p class="tagline">Getting <span>{{ client_ip }}</span> there brisker!</p>
         
         <form method="POST" action="/shorten">
             <input type="url" name="url" placeholder="Paste long URL here..." required>
@@ -297,7 +315,7 @@ HTML_TEMPLATE = """
         
         {% if stats %}
         <div class="stats">
-            <h2>Recent URLs ({{ total_urls }} total)</h2>
+            <h2>Your URLs ({{ your_url_count }})</h2>
             <table>
                 <tr><th>Code</th><th>Destination</th><th>Clicks</th></tr>
                 {% for url in stats %}
@@ -308,6 +326,7 @@ HTML_TEMPLATE = """
                 </tr>
                 {% endfor %}
             </table>
+            <p class="total">{{ total_urls }} URLs shortened globally</p>
         </div>
         {% endif %}
         
@@ -320,10 +339,11 @@ HTML_TEMPLATE = """
 
 @app.route("/")
 def home():
-    """Home page - show form and recent URLs."""
+    """Home page - show form and user's URLs."""
     result = None
     error = request.args.get('error')
     created = request.args.get('created')
+    client_ip = g.client_ip
     
     # Show result if we just created a URL (via redirect)
     if created:
@@ -340,18 +360,22 @@ def home():
         result = {"error": error}
     
     try:
-        stats = get_stats()
+        # Only show URLs created by this visitor's IP
+        stats = get_stats_by_ip(client_ip)
+        your_url_count = get_url_count_by_ip(client_ip)
         total_urls = get_total_urls()
     except Exception as e:
         print(f"Error getting stats: {e}")
         stats = []
+        your_url_count = 0
         total_urls = 0
     
     return render_template_string(HTML_TEMPLATE, 
                                   result=result, 
                                   stats=stats, 
+                                  your_url_count=your_url_count,
                                   total_urls=total_urls,
-                                  client_ip=g.client_ip)
+                                  client_ip=client_ip)
 
 
 @app.route("/shorten", methods=["POST"])
@@ -430,10 +454,12 @@ def api_shorten():
 
 @app.route("/api/stats")
 def api_stats():
-    """API endpoint for getting stats."""
+    """API endpoint for getting stats (your URLs only)."""
+    client_ip = g.client_ip
     return jsonify({
+        "your_urls": get_url_count_by_ip(client_ip),
         "total_urls": get_total_urls(),
-        "recent": get_stats()
+        "urls": get_stats_by_ip(client_ip)
     })
 
 
