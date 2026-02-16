@@ -1,7 +1,6 @@
 """
 bris.kr - Minimal URL Shortener
-Uses kumori-404602 PostgreSQL database for storage
-Schema: briskr.urls
+PostgreSQL-backed URL shortener with no tracking
 """
 import os
 import string
