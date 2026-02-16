@@ -9,11 +9,12 @@
 
 ## What is this?
 
-A minimal, fast URL shortener built as a learning project. Unlike commercial shorteners, **bris.kr**:
+Most URL shorteners charge for basic features or plaster your links with ads and tracking. I wanted something simple that just works, so I built **bris.kr**:
 
-- ✅ **No tracking** - Clean redirects without surveillance
+- ✅ **No tracking** - Clean redirects, no surveillance
 - ✅ **No ads** - Just fast, simple links
 - ✅ **Free to use** - Live at [bris.kr](https://bris.kr)
+- ✅ **Open source** - Use mine or stand up your own
 
 ## Features
 
@@ -40,20 +41,24 @@ Built to learn cloud infrastructure and web services:
 
 ## Code
 
-The full source code is in this repository. Feel free to explore how it works:
+The full source code is here if you want to:
+- See how it works
+- Learn from the implementation
+- Stand up your own instance
 
+Key files:
 - `app.py` - Main Flask application (~200 lines)
 - `app.yaml` - Cloud deployment config
 - `requirements.txt` - Python dependencies
 
-## About
+## Use It
 
-Created as a personal project to:
-- Learn serverless deployment patterns
-- Practice PostgreSQL database design
-- Build a useful tool without ads or tracking
+You're welcome to:
+- **Use the live version** at [bris.kr](https://bris.kr) - it's free
+- **Deploy your own** - all the code is here
+- **Learn from it** - see how simple a URL shortener can be
 
-If you find this useful, feel free to use it at **[bris.kr](https://bris.kr)** or fork the code for your own projects.
+I built this because I was tired of URL shorteners that charge for basic features or track every click. Sometimes you just need a simple tool that works.
 
 ---
 
