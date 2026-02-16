@@ -1,238 +1,60 @@
 # bris.kr - Privacy-First URL Shortener
 
-> **🔗 Live at [bris.kr](https://bris.kr)** - A minimal, fast URL shortener with **no tracking and no ads**.
+> **🔗 [Try it now at bris.kr](https://bris.kr)** - Free URL shortener with no tracking and no ads.
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)](https://flask.palletsprojects.com/)
 [![GCP](https://img.shields.io/badge/GCP-App%20Engine-orange.svg)](https://cloud.google.com/appengine)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
 
-## Why?
+## What is this?
 
-Most URL shorteners either track your users, show ads, or disappear when the company shuts down. **bris.kr** is different:
+A minimal, fast URL shortener built as a learning project. Unlike commercial shorteners, **bris.kr**:
 
-- ✅ **No tracking** - We don't log IPs, user agents, or referrers
-- ✅ **No ads** - Clean, fast redirects
-- ✅ **Self-hosted** - You control the data
-- ✅ **22+ URLs shortened** - In active production use
-
-Built as a learning project to understand GCP App Engine, PostgreSQL, and minimal web services.
+- ✅ **No tracking** - Clean redirects without surveillance
+- ✅ **No ads** - Just fast, simple links
+- ✅ **Free to use** - Live at [bris.kr](https://bris.kr)
 
 ## Features
 
-- 🚀 **Auto-scaling** - Scales to zero when idle ($0/month)
-- 🔐 **Secure** - Admin key authentication via Secret Manager
-- 📊 **Stats** - Click tracking for your own links
-- 🎯 **Custom codes** - Use `bris.kr/mylink` instead of random strings
-- 🌐 **API + Web UI** - Both interfaces included
+- 🚀 **Fast redirects** - Minimal latency
+- 🎯 **Custom short codes** - Choose your own URL slug
+- 📊 **Basic stats** - See how many clicks your links get
+- 🌐 **Simple API** - Programmatic link creation
 
-## Architecture
+## How to Use
 
-```
-┌─────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│   bris.kr   │────▶│  briskr (GAE)       │────▶│ kumori-404602    │
-│   domain    │     │  App Engine         │     │ PostgreSQL + SM  │
-└─────────────┘     └─────────────────────┘     └──────────────────┘
-```
-
-Uses `KUMORI_POSTGRES_*` secrets - the canonical database credentials.
-
----
+1. Visit **[bris.kr](https://bris.kr)**
+2. Paste your long URL
+3. Get a short link like `bris.kr/abc`
+4. Share it!
 
 ## Tech Stack
 
-- **Backend:** Python 3.11, Flask 3.0
-- **Database:** PostgreSQL 16 (shared with kumori.ai)
-- **Hosting:** Google Cloud App Engine (Standard)
-- **Secrets:** Google Secret Manager
-- **Domain:** Custom domain via Cloud DNS
+Built to learn cloud infrastructure and web services:
+
+- **Backend:** Python, Flask
+- **Database:** PostgreSQL
+- **Hosting:** Google Cloud Platform
+- **Infrastructure:** Serverless auto-scaling
+
+## Code
+
+The full source code is in this repository. Feel free to explore how it works:
+
+- `app.py` - Main Flask application (~200 lines)
+- `app.yaml` - Cloud deployment config
+- `requirements.txt` - Python dependencies
+
+## About
+
+Created as a personal project to:
+- Learn serverless deployment patterns
+- Practice PostgreSQL database design
+- Build a useful tool without ads or tracking
+
+If you find this useful, feel free to use it at **[bris.kr](https://bris.kr)** or fork the code for your own projects.
 
 ---
 
-## Deployment
-
-### 🐍 Option A: One-Command Python Setup (Recommended)
-
-```bash
-# 1. Install deployment dependencies
-pip install -r requirements-deploy.txt
-
-# 2. Run the setup script (does EVERYTHING)
-python deploy_setup.py --billing-account=XXXXXX-XXXXXX-XXXXXX
-```
-
-This single command:
-- ✅ Creates the `briskr` GCP project
-- ✅ Links your billing account
-- ✅ Enables all required APIs
-- ✅ Creates App Engine application
-- ✅ Grants cross-project permissions to kumori-404602
-- ✅ Generates secure admin key
-- ✅ Deploys the application
-
-### Script Options
-
-```bash
-# Just setup, don't deploy yet
-python deploy_setup.py --billing-account=XXXXXX --skip-deploy
-
-# Use a specific admin key
-python deploy_setup.py --billing-account=XXXXXX --admin-key=my_custom_key
-```
-
----
-
-## 🔧 Option B: Manual gcloud CLI Setup
-
-<details>
-<summary>Click to expand manual steps</summary>
-
-### 1. Create GCP Project
-
-```bash
-gcloud projects create briskr --name="Bris KR URL Shortener"
-gcloud config set project briskr
-gcloud billing projects link briskr --billing-account=YOUR_BILLING_ACCOUNT
-```
-
-### 2. Enable APIs
-
-```bash
-gcloud services enable appengine.googleapis.com
-gcloud services enable secretmanager.googleapis.com
-gcloud services enable sqladmin.googleapis.com
-gcloud services enable cloudbuild.googleapis.com
-gcloud app create --region=us-central1
-```
-
-### 3. Grant Cross-Project Access
-
-```bash
-gcloud projects add-iam-policy-binding kumori-404602 \
-    --member="serviceAccount:briskr@appspot.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor"
-
-gcloud projects add-iam-policy-binding kumori-404602 \
-    --member="serviceAccount:briskr@appspot.gserviceaccount.com" \
-    --role="roles/cloudsql.client"
-```
-
-### 4. Generate Admin Key & Deploy
-
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
-gcloud app deploy --set-env-vars="ADMIN_KEY=YOUR_KEY"
-```
-
-</details>
-
----
-
-## Configure Custom Domain (bris.kr)
-
-After deployment, in GCP Console → App Engine → Settings → Custom domains:
-
-1. Add `bris.kr`
-2. Verify domain ownership (add TXT record at your registrar)
-3. Add DNS records:
-   - A record: `@` → (IP provided by GCP)
-   - AAAA record: `@` → (IPv6 provided by GCP)
-   - CNAME: `www` → `ghs.googlehosted.com`
-
----
-
-## Usage
-
-### Web Interface
-
-Visit `https://bris.kr?key=YOUR_ADMIN_KEY` to:
-- Create new short URLs
-- See all URLs with click counts
-- Use custom codes like `bris.kr/mylink`
-
-### API
-
-```bash
-# Create short URL
-curl -X POST https://bris.kr/api/shorten \
-  -H "X-Admin-Key: YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com/very/long/url", "code": "test"}'
-
-# Get stats
-curl "https://bris.kr/api/stats?key=YOUR_KEY"
-```
-
----
-
-## Database Table
-
-Created automatically in your kumori database (public schema):
-
-```sql
-CREATE TABLE briskr_urls (
-    id SERIAL PRIMARY KEY,
-    short_code VARCHAR(20) UNIQUE NOT NULL,
-    long_url TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    click_count INTEGER DEFAULT 0,
-    last_clicked TIMESTAMP,
-    created_by VARCHAR(100) DEFAULT 'anonymous'
-);
-```
-
----
-
-## Files
-
-```
-briskr/
-├── app.py              # Main Flask application (~200 lines)
-├── app.yaml            # App Engine config
-├── requirements.txt    # Runtime dependencies (4 packages)
-├── deploy_setup.py     # Python GCP setup script
-├── requirements-deploy.txt  # Setup script dependencies
-├── .gitignore
-├── .gcloudignore
-└── static/
-    └── favicon.ico     # (add your own)
-```
-
----
-
-## Costs
-
-- **Idle**: $0/month (scales to zero with `min_instances: 0`)
-- **Light use**: ~$0-5/month
-- **Cloud SQL**: Already running for kumori (no additional cost)
-
----
-
-## Troubleshooting
-
-**502 Bad Gateway**
-```bash
-gcloud app logs tail -s default --project=briskr
-```
-
-**Secret Access Denied**
-```bash
-gcloud projects add-iam-policy-binding kumori-404602 \
-    --member="serviceAccount:briskr@appspot.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor"
-```
-
-**View Logs**
-```bash
-gcloud app logs tail -s default --project=briskr
-```
-
----
-
-## Future Enhancements (Post-MVP)
-
-- [ ] Auth0/WorkOS login integration
-- [ ] Per-user URL management  
-- [ ] QR code generation
-- [ ] Link expiration
-- [ ] Analytics dashboard
+**License:** Feel free to learn from this code. See individual files for implementation details.
