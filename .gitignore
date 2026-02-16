@@ -24,3 +24,6 @@ __pycache__/
 
 # Local dev files
 *.log
+*.mp3
+*.mp4
+*.wav
