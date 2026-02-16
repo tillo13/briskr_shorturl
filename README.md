@@ -1,6 +1,30 @@
-# bris.kr - Minimal URL Shortener
+# bris.kr - Privacy-First URL Shortener
 
-Super simple URL shortener using your kumori PostgreSQL database.
+> **🔗 Live at [bris.kr](https://bris.kr)** - A minimal, fast URL shortener with **no tracking and no ads**.
+
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)](https://flask.palletsprojects.com/)
+[![GCP](https://img.shields.io/badge/GCP-App%20Engine-orange.svg)](https://cloud.google.com/appengine)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
+
+## Why?
+
+Most URL shorteners either track your users, show ads, or disappear when the company shuts down. **bris.kr** is different:
+
+- ✅ **No tracking** - We don't log IPs, user agents, or referrers
+- ✅ **No ads** - Clean, fast redirects
+- ✅ **Self-hosted** - You control the data
+- ✅ **22+ URLs shortened** - In active production use
+
+Built as a learning project to understand GCP App Engine, PostgreSQL, and minimal web services.
+
+## Features
+
+- 🚀 **Auto-scaling** - Scales to zero when idle ($0/month)
+- 🔐 **Secure** - Admin key authentication via Secret Manager
+- 📊 **Stats** - Click tracking for your own links
+- 🎯 **Custom codes** - Use `bris.kr/mylink` instead of random strings
+- 🌐 **API + Web UI** - Both interfaces included
 
 ## Architecture
 
@@ -15,7 +39,19 @@ Uses `KUMORI_POSTGRES_*` secrets - the canonical database credentials.
 
 ---
 
-## 🐍 Option A: One-Command Python Setup (Recommended)
+## Tech Stack
+
+- **Backend:** Python 3.11, Flask 3.0
+- **Database:** PostgreSQL 16 (shared with kumori.ai)
+- **Hosting:** Google Cloud App Engine (Standard)
+- **Secrets:** Google Secret Manager
+- **Domain:** Custom domain via Cloud DNS
+
+---
+
+## Deployment
+
+### 🐍 Option A: One-Command Python Setup (Recommended)
 
 ```bash
 # 1. Install deployment dependencies
