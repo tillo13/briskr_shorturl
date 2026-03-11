@@ -6,7 +6,7 @@ import os
 import string
 import random
 
-from flask import Flask, request, redirect, jsonify, render_template_string, url_for, g
+from flask import Flask, request, redirect, jsonify, render_template_string, url_for, g, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 from google.cloud import secretmanager
 import psycopg
@@ -33,12 +33,21 @@ MAX_CODE_LENGTH = 6  # Max length if all shorter codes used
 # DATABASE HELPERS
 # ============================================================================
 
+_secrets_cache = {}
+_sm_client = None
+
 def get_secret(secret_id: str) -> str:
-    """Fetch secret from Google Secret Manager."""
-    client = secretmanager.SecretManagerServiceClient()
+    """Fetch secret from Google Secret Manager (cached)."""
+    if secret_id in _secrets_cache:
+        return _secrets_cache[secret_id]
+    global _sm_client
+    if _sm_client is None:
+        _sm_client = secretmanager.SecretManagerServiceClient()
     name = f"projects/{GCP_SECRET_PROJECT}/secrets/{secret_id}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
+    response = _sm_client.access_secret_version(request={"name": name})
+    val = response.payload.data.decode("UTF-8")
+    _secrets_cache[secret_id] = val
+    return val
 
 
 def get_db_connection():
@@ -335,6 +344,19 @@ HTML_TEMPLATE = """
 </html>
 """
 
+
+@app.route("/sitemap.xml")
+def sitemap():
+    xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://bris.kr/</loc><changefreq>monthly</changefreq><priority>1.0</priority></url>
+</urlset>'''
+    return Response(xml, mimetype='application/xml')
+
+@app.route("/robots.txt")
+def robots():
+    content = 'User-agent: *\nAllow: /\nDisallow: /<short_code>\nSitemap: https://bris.kr/sitemap.xml\n'
+    return Response(content, mimetype='text/plain')
 
 @app.route("/")
 def home():

@@ -14,7 +14,7 @@ import select
 # Configuration
 EXPECTED_PROJECT_ID = "briskr"
 SERVICE_NAME = "default"
-VERSION_MAX = 10
+VERSION_MAX = 3
 
 def print_separator():
     print("\n" + "="*70 + "\n")
