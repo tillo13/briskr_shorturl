@@ -2,6 +2,18 @@
 """
 Deployment script for bris.kr URL Shortener
 """
+# ============================================================================
+# MIGRATION NOTE (2026-03-12):
+# This script is being replaced by the centralized deploy tool at:
+#   ~/Desktop/code/master_gcp_deploy/deploy.py (symlinked to ~/.local/bin/deploy)
+# Config for this project lives in: deploy.json (in this directory)
+#
+# New usage:  deploy "commit message"
+# Old usage:  python gcloud_deploy.py
+#
+# This script still works but will be removed once migration is verified.
+# See: ~/Desktop/code/master_gcp_deploy/ for full documentation.
+# ============================================================================
 
 import subprocess
 import json

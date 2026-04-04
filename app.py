@@ -6,6 +6,7 @@ import os
 import string
 import random
 
+from datetime import datetime, timezone
 from flask import Flask, request, redirect, jsonify, render_template_string, url_for, g, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
 from google.cloud import secretmanager
@@ -252,10 +253,33 @@ def get_total_urls() -> int:
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>bris.kr</title>
+    <title>Briskr - Free URL Shortener | bris.kr</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Shorten URLs instantly with Briskr. Free, fast link shortener with no tracking and no ads. Create short memorable links at bris.kr.">
+    <link rel="canonical" href="https://bris.kr/">
+    <meta property="og:title" content="Briskr - Free URL Shortener">
+    <meta property="og:description" content="Shorten URLs instantly. Free, fast, no tracking, no ads.">
+    <meta property="og:url" content="https://bris.kr/">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://bris.kr/static/og-card.svg">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Briskr",
+      "url": "https://bris.kr",
+      "description": "Free URL shortener with no tracking and no ads. Create short memorable links instantly.",
+      "applicationCategory": "UtilityApplication",
+      "operatingSystem": "All",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { 
@@ -297,11 +321,15 @@ HTML_TEMPLATE = """
         .error { color: #f87171; }
         .info { color: #666; font-size: 0.875rem; margin-top: 2rem; }
         .total { color: #555; font-size: 0.75rem; }
+        .cross-links { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #222; }
+        .cross-links p { color: #555; font-size: 0.75rem; margin-bottom: 0.5rem; }
+        .cross-links a { color: #555; font-size: 0.75rem; margin-right: 1rem; text-decoration: none; }
+        .cross-links a:hover { color: #4ade80; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>bris<span>.kr</span></h1>
+        <h1>Briskr<span> URL Shortener</span></h1>
         <p class="tagline">Making links brisker for: <span>{{ client_ip }}</span>!</p>
         
         <form method="POST" action="/shorten">
@@ -339,6 +367,16 @@ HTML_TEMPLATE = """
         {% endif %}
         
         <p class="info">Free URL shortener. No tracking, no ads.</p>
+
+        <footer class="cross-links">
+            <p>More from our network:</p>
+            <a href="https://noqout.com">NoQout</a>
+            <a href="https://pilgri.ms">Pilgri.ms</a>
+            <a href="https://kindness.social">Kindness.social</a>
+            <a href="https://crab.travel">Crab.travel</a>
+            <a href="https://scatterbrain.us">Scatterbrain</a>
+            <a href="https://digitalempiretv.com">DigitalEmpireTV</a>
+        </footer>
     </div>
 </body>
 </html>
@@ -348,27 +386,30 @@ HTML_TEMPLATE = """
 @app.route("/sitemap.xml")
 def sitemap():
     host = request.host_url.rstrip('/')
-    skip = {'api', 'admin', 'auth', 'login', 'logout', 'callback', 'health', 'sitemap', 'robots', 'tasks', 'cron', 'debug', 'shorten'}
-    urls = []
-    for rule in app.url_map.iter_rules():
-        if 'GET' not in rule.methods or rule.arguments:
-            continue
-        path = rule.rule
-        parts = path.strip('/').split('/')
-        if any(p in skip for p in parts):
-            continue
-        if path.startswith('/api/') or path.startswith('/admin') or path.startswith('/static'):
-            continue
-        priority = '1.0' if path == '/' else '0.6'
-        urls.append(f'  <url><loc>{host}{path}</loc><priority>{priority}</priority></url>')
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' + '\n'.join(sorted(urls)) + '\n</urlset>'
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    # Only list real public pages — just the homepage for a URL shortener
+    xml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>{host}/</loc>
+    <lastmod>{today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>'''
     return Response(xml, mimetype='application/xml')
 
 @app.route("/robots.txt")
 def robots():
     host = request.host_url.rstrip('/')
-    content = f'User-agent: *\nAllow: /\nSitemap: {host}/sitemap.xml\n'
+    content = f'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /shorten\nSitemap: {host}/sitemap.xml\n'
     return Response(content, mimetype='text/plain')
+
+
+@app.route("/b4c9ebbc8faa4d7b8b2b8104b6511fee.txt")
+def indexnow_key():
+    return Response('b4c9ebbc8faa4d7b8b2b8104b6511fee', mimetype='text/plain')
+
 
 @app.route("/")
 def home():

@@ -1,4 +1,24 @@
 #!/bin/bash
+# ============================================================================
+# DEPRECATED (2026-03-14): Use the centralized deploy tool instead.
+#   deploy "commit message"
+# This script is kept for reference only. It will not run.
+# See: ~/Desktop/code/master_gcp_deploy/ for full documentation.
+# ============================================================================
+
+# Block execution — redirect to centralized deploy tool
+echo ""
+echo "⛔ This script is deprecated and disabled."
+echo ""
+echo "Use the centralized deploy tool instead:"
+echo "   deploy \"your commit message\""
+echo ""
+echo "The old git_push.sh left orphaned gcloud processes that consumed"
+echo "hundreds of percent CPU. The deploy tool exits cleanly."
+echo ""
+exit 1
+
+# === ORIGINAL SCRIPT BELOW (kept for reference, unreachable) ===
 
 # BRISKR PROJECT CONFIGURATION - CRITICAL SAFEGUARDS
 EXPECTED_PROJECT="briskr"
