@@ -93,6 +93,12 @@ def get_client_ip() -> str:
     return request.remote_addr or 'unknown'
 
 
+@app.before_request
+def force_canonical_host():
+    host = request.headers.get('Host', '')
+    if host.startswith('www.'):
+        return redirect(f'https://bris.kr{request.full_path}', code=301)
+
 # Log IP on every request
 @app.before_request
 def log_request_info():
