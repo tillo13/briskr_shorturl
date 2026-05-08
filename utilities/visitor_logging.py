@@ -57,7 +57,8 @@ def _get_db_creds() -> dict:
 
 
 def _connect():
-    import psycopg2
+    """Connect to kumori-404602 Postgres. Works with either psycopg2 (v2) or
+    psycopg (v3) installed — Andy's projects mix the two."""
     creds = _get_db_creds()
     is_gcp = os.environ.get('GAE_ENV', '').startswith('standard') or os.path.exists('/cloudsql')
     if is_gcp:
@@ -65,11 +66,20 @@ def _connect():
         host = f"{socket_dir}/{creds['connection_name']}"
     else:
         host = creds['host']
-    return psycopg2.connect(
-        host=host, dbname=creds['dbname'], user=creds['user'],
-        password=creds['password'], connect_timeout=5,
-        options='-c statement_timeout=5000',
-    )
+    try:
+        import psycopg2
+        return psycopg2.connect(
+            host=host, dbname=creds['dbname'], user=creds['user'],
+            password=creds['password'], connect_timeout=5,
+            options='-c statement_timeout=5000',
+        )
+    except ImportError:
+        import psycopg
+        return psycopg.connect(
+            host=host, dbname=creds['dbname'], user=creds['user'],
+            password=creds['password'], connect_timeout=5,
+            options='-c statement_timeout=5000',
+        )
 
 
 # ─── Bot detection / source classification ───────────────────────────────────
