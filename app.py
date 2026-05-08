@@ -414,9 +414,10 @@ def sitemap():
 
 @app.route("/robots.txt")
 def robots():
+    from utilities.visitor_logging import append_bot_block
     host = request.host_url.rstrip('/')
     content = f'User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /shorten\nSitemap: {host}/sitemap.xml\n'
-    return Response(content, mimetype='text/plain')
+    return Response(append_bot_block(content), mimetype='text/plain')
 
 
 @app.route("/b4c9ebbc8faa4d7b8b2b8104b6511fee.txt")
