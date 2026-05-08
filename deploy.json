@@ -1,6 +1,12 @@
 {
-    "project_id": "briskr",
-    "app_name": "Briskr",
-    "github_repo": "https://github.com/tillo13/briskr_shorturl.git",
-    "custom_domain": "https://bris.kr"
+  "project_id": "briskr",
+  "app_name": "Briskr",
+  "github_repo": "https://github.com/tillo13/briskr_shorturl.git",
+  "custom_domain": "https://bris.kr",
+  "shared_files": [
+    {
+      "src": "visitor_logging/visitor_logging.py",
+      "dst": "utilities/visitor_logging.py"
+    }
+  ]
 }

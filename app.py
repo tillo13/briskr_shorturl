@@ -15,6 +15,13 @@ from psycopg.rows import dict_row
 
 app = Flask(__name__)
 
+# Cross-app visitor logging → kumori_ops.visitor_log
+try:
+    from utilities.visitor_logging import install_middleware as _install_visitor_logging
+    _install_visitor_logging(app, 'briskr')
+except Exception as _vl_e:
+    pass
+
 # Trust proxy headers (App Engine has 2 proxies in front)
 # This makes request.remote_addr return the real client IP
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2, x_proto=1, x_host=1)

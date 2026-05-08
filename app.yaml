@@ -5,8 +5,10 @@ entrypoint: gunicorn -b :$PORT app:app
 
 automatic_scaling:
   min_instances: 0
-  max_instances: 2
-  target_cpu_utilization: 0.8
+  max_instances: 3
+  target_throughput_utilization: 0.5
+  max_concurrent_requests: 20
+  max_pending_latency: 30ms
 
 beta_settings:
   cloud_sql_instances: "kumori-404602:us-central1:kumori"
