@@ -15,6 +15,13 @@ from psycopg.rows import dict_row
 
 app = Flask(__name__)
 
+# GA4 tag injection — registers `ga_snippet(slug)` for use in HTML_TEMPLATE
+try:
+    from utilities.gtag import snippet as _ga_snippet
+    app.jinja_env.globals['ga_snippet'] = _ga_snippet
+except Exception:
+    pass
+
 # Cross-app visitor logging → kumori_ops.visitor_log
 try:
     from utilities.visitor_logging import install_middleware as _install_visitor_logging
