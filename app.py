@@ -339,6 +339,7 @@ HTML_TEMPLATE = """
         .cross-links a { color: #555; font-size: 0.75rem; margin-right: 1rem; text-decoration: none; }
         .cross-links a:hover { color: #4ade80; }
     </style>
+    {{ ga_snippet('briskr') | safe }}
 </head>
 <body>
     <div class="container">
