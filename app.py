@@ -70,8 +70,8 @@ def get_db_connection():
     is_gcp = os.environ.get('GAE_ENV', '').startswith('standard')
     
     dbname = get_secret('KUMORI_POSTGRES_DB_NAME')
-    user = get_secret('KUMORI_POSTGRES_USERNAME')
-    password = get_secret('KUMORI_POSTGRES_PASSWORD')
+    user = get_secret('BRISKR_POSTGRES_USERNAME')
+    password = get_secret('BRISKR_POSTGRES_PASSWORD')
     
     if is_gcp:
         connection_name = get_secret('KUMORI_POSTGRES_CONNECTION_NAME')
