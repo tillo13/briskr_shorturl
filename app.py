@@ -3,15 +3,25 @@ bris.kr - Minimal URL Shortener
 PostgreSQL-backed URL shortener with no tracking
 """
 import os
+import re
+import secrets
 import string
 import random
 
-from datetime import datetime, timezone
-from flask import Flask, request, redirect, jsonify, render_template_string, url_for, g, Response
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
+from flask import Flask, request, redirect, jsonify, render_template_string, session, url_for, g, Response
 from werkzeug.middleware.proxy_fix import ProxyFix
-from google.cloud import secretmanager
-import psycopg
-from psycopg.rows import dict_row
+
+# The connection is kumori's canonical pool, vendored on every deploy (deploy.json shared_files ->
+# utilities/kumori_db.py); never edit that copy. Until 2026-10-11 every request opened its own
+# connection, so a scanner's 235 probes in one minute became 67 logins on the shared database.
+os.environ.setdefault('DB_ROLE', 'briskr_app')
+os.environ.setdefault('DB_SECRET_PREFIX', 'BRISKR')
+os.environ.setdefault('DB_POOL_MAX', '2')          # x max_instances 3 = 6 of briskr_app's 10
+os.environ.setdefault('DB_DICT_ROWS', '1')
+from utilities.kumori_db import db_cursor  # noqa: E402
+from utilities.google_secrets_utils import get_secret  # noqa: E402
 
 app = Flask(__name__)
 
@@ -37,51 +47,34 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=2, x_proto=1, x_host=1)
 # CONFIGURATION
 # ============================================================================
 
-GCP_SECRET_PROJECT = "kumori-404602"
 BASE_URL = os.environ.get("BASE_URL", "https://bris.kr")
+
+# Creating a link needs a Google sign-in from this list; following one never does. The form was
+# open to anyone until 2026-10-11: on 2026-10-05..08 four strangers made five links to
+# previous.oriwada.xyz and tinu.be that drew 1,942 of the 3,538 clicks bris.kr had ever served.
+# The list is a secret because this repository is public.
+CREATOR_EMAILS = frozenset(e.strip().lower() for e in (get_secret('BRISKR_CREATOR_EMAILS') or '').split(',') if e.strip())
+app.secret_key = get_secret('BRISKR_SECRET_KEY') or secrets.token_hex(32)   # no secret = sessions end at restart
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
+                  SESSION_COOKIE_SECURE=os.environ.get('GAE_ENV', '').startswith('standard'),
+                  SESSION_COOKIE_NAME='briskr_session', PERMANENT_SESSION_LIFETIME=timedelta(days=30))
+from utilities.google_auth import GoogleAuth  # noqa: E402
+gauth = GoogleAuth(app)
+
+# A code is what the form lets you type: letters, digits, _ and -, at most 20. Anything else
+# (/.env, /xmlrpc.php, /wp-login.php) is answered 404 without a database query.
+CODE_SHAPE = re.compile(r'^[a-z0-9_-]{1,20}$')
+
+# Other shorteners, as of 2026-10-11. A short link to a short link only hides where it goes.
+SHORTENER_HOSTS = frozenset((
+    'bris.kr', 'bit.ly', 'bitly.com', 'tinyurl.com', 't.co', 'goo.gl', 'is.gd', 'v.gd', 'ow.ly',
+    'buff.ly', 'rebrand.ly', 'cutt.ly', 'shorturl.at', 'rb.gy', 't.ly', 'tiny.cc', 'tinu.be',
+    's.id', 'lnkd.in', 'qr.ae', 'shorter.me', 'short.io', 'tiny.one', 'urlz.fr', 'x.gd', 'da.gd',
+))
 
 # Short code settings - start small, grow as needed
 MIN_CODE_LENGTH = 2  # Start with 2 chars (a9, bX, etc.)
 MAX_CODE_LENGTH = 6  # Max length if all shorter codes used
-
-# ============================================================================
-# DATABASE HELPERS
-# ============================================================================
-
-_secrets_cache = {}
-_sm_client = None
-
-def get_secret(secret_id: str) -> str:
-    """Fetch secret from Google Secret Manager (cached)."""
-    if secret_id in _secrets_cache:
-        return _secrets_cache[secret_id]
-    global _sm_client
-    if _sm_client is None:
-        _sm_client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{GCP_SECRET_PROJECT}/secrets/{secret_id}/versions/latest"
-    response = _sm_client.access_secret_version(request={"name": name})
-    val = response.payload.data.decode("UTF-8")
-    _secrets_cache[secret_id] = val
-    return val
-
-
-def get_db_connection():
-    """Get database connection - works on GAE and locally."""
-    is_gcp = os.environ.get('GAE_ENV', '').startswith('standard')
-    
-    dbname = get_secret('KUMORI_POSTGRES_DB_NAME')
-    user = get_secret('BRISKR_POSTGRES_USERNAME')
-    password = get_secret('BRISKR_POSTGRES_PASSWORD')
-    
-    if is_gcp:
-        connection_name = get_secret('KUMORI_POSTGRES_CONNECTION_NAME')
-        host = f"/cloudsql/{connection_name}"
-    else:
-        host = get_secret('KUMORI_POSTGRES_IP')
-    
-    conninfo = f"host={host} dbname={dbname} user={user} password={password}"
-    return psycopg.connect(conninfo, row_factory=dict_row)
-
 
 # ============================================================================
 # IP ADDRESS HELPER
@@ -132,139 +125,110 @@ def generate_short_code(length: int = 2) -> str:
     return ''.join(random.choices(chars, k=length))
 
 
-def find_available_code() -> str:
+def find_available_code(cur) -> str:
     """Find an available short code, starting with shortest possible."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            for length in range(MIN_CODE_LENGTH, MAX_CODE_LENGTH + 1):
-                for _ in range(10):
-                    code = generate_short_code(length)
-                    cur.execute(
-                        "SELECT 1 FROM briskr.urls WHERE short_code = %s",
-                        (code,)
-                    )
-                    if not cur.fetchone():
-                        return code
-            return generate_short_code(MAX_CODE_LENGTH)
-    finally:
-        conn.close()
+    for length in range(MIN_CODE_LENGTH, MAX_CODE_LENGTH + 1):
+        for _ in range(10):
+            code = generate_short_code(length)
+            cur.execute("SELECT 1 FROM briskr.urls WHERE short_code = %s", (code,))
+            if not cur.fetchone():
+                return code
+    return generate_short_code(MAX_CODE_LENGTH)
 
 
-def create_short_url(long_url: str, custom_code: str = None, client_ip: str = None) -> dict:
+def refuse_destination(long_url: str) -> str | None:
+    """Why this URL may not be shortened, or None."""
+    parts = urlsplit(long_url)
+    host = (parts.hostname or '').lower()
+    if parts.scheme not in ('http', 'https') or '.' not in host:
+        return 'That is not a web address'
+    if any(host == h or host.endswith('.' + h) for h in SHORTENER_HOSTS):
+        return f'{host} is already a link shortener'
+    return None
+
+
+def create_short_url(long_url: str, custom_code: str = None, client_ip: str = None, created_by: str = None) -> dict:
     """Create a new short URL."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            if custom_code:
-                cur.execute(
-                    "SELECT short_code FROM briskr.urls WHERE short_code = %s",
-                    (custom_code.lower(),)
-                )
-                if cur.fetchone():
-                    return {"error": f"Code '{custom_code}' already exists"}
-                short_code = custom_code.lower()
-            else:
-                short_code = find_available_code()
-            
-            cur.execute("""
-                INSERT INTO briskr.urls (short_code, long_url, created_by_ip)
-                VALUES (%s, %s, %s)
-                RETURNING id, short_code, long_url, created_at
-            """, (short_code, long_url, client_ip))
-            
-            result = cur.fetchone()
-            conn.commit()
-            
-            print(f"✅ Created short URL: {short_code} -> {long_url[:50]}... (IP: {client_ip})")
-            
-            return {
-                "short_url": f"{BASE_URL}/{result['short_code']}",
-                "short_code": result['short_code'],
-                "long_url": result['long_url'],
-                "created_at": str(result['created_at'])
-            }
-    finally:
-        conn.close()
+    refused = refuse_destination(long_url)
+    if refused:
+        return {"error": refused}
+    if custom_code and not CODE_SHAPE.match(custom_code.lower()):
+        return {"error": "A code is letters, digits, _ and -, at most 20"}
+    with db_cursor(commit=True) as cur:
+        if custom_code:
+            cur.execute("SELECT short_code FROM briskr.urls WHERE short_code = %s", (custom_code.lower(),))
+            if cur.fetchone():
+                return {"error": f"Code '{custom_code}' already exists"}
+            short_code = custom_code.lower()
+        else:
+            short_code = find_available_code(cur)
+
+        cur.execute("""
+            INSERT INTO briskr.urls (short_code, long_url, created_by_ip, created_by)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id, short_code, long_url, created_at
+        """, (short_code, long_url, client_ip, created_by))
+        result = cur.fetchone()
+
+    print(f"✅ Created short URL: {short_code} -> {long_url[:50]}... (IP: {client_ip})")
+    return {
+        "short_url": f"{BASE_URL}/{result['short_code']}",
+        "short_code": result['short_code'],
+        "long_url": result['long_url'],
+        "created_at": str(result['created_at'])
+    }
 
 
 def get_url_by_code(short_code: str) -> dict | None:
     """Get URL info by short code."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT short_code, long_url, click_count, created_at
-                FROM briskr.urls WHERE short_code = %s
-            """, (short_code.lower(),))
-            return cur.fetchone()
-    finally:
-        conn.close()
+    with db_cursor() as cur:
+        cur.execute("""
+            SELECT short_code, long_url, click_count, created_at
+            FROM briskr.urls WHERE short_code = %s
+        """, (short_code.lower(),))
+        return cur.fetchone()
 
 
 def get_long_url(short_code: str) -> str | None:
-    """Get long URL and increment click count."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE briskr.urls 
-                SET click_count = click_count + 1,
-                    last_clicked = CURRENT_TIMESTAMP
-                WHERE short_code = %s
-                RETURNING long_url
-            """, (short_code.lower(),))
-            
-            result = cur.fetchone()
-            conn.commit()
-            
-            return result['long_url'] if result else None
-    finally:
-        conn.close()
+    """Get long URL and increment click count. A disabled link (disabled_at set) is not served."""
+    with db_cursor(commit=True) as cur:
+        cur.execute("""
+            UPDATE briskr.urls
+            SET click_count = click_count + 1,
+                last_clicked = CURRENT_TIMESTAMP
+            WHERE short_code = %s AND disabled_at IS NULL
+            RETURNING long_url
+        """, (short_code.lower(),))
+        result = cur.fetchone()
+    return result['long_url'] if result else None
 
 
 def get_stats_by_ip(client_ip: str) -> list:
     """Get URLs created by a specific IP address."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT short_code, long_url, click_count, created_at, last_clicked
-                FROM briskr.urls
-                WHERE created_by_ip = %s
-                ORDER BY created_at DESC
-                LIMIT 100
-            """, (client_ip,))
-            return cur.fetchall()
-    finally:
-        conn.close()
+    with db_cursor() as cur:
+        cur.execute("""
+            SELECT short_code, long_url, click_count, created_at, last_clicked
+            FROM briskr.urls
+            WHERE created_by_ip = %s AND disabled_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 100
+        """, (client_ip,))
+        return cur.fetchall()
 
 
 def get_url_count_by_ip(client_ip: str) -> int:
     """Get count of URLs created by a specific IP."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) as count FROM briskr.urls WHERE created_by_ip = %s",
-                (client_ip,)
-            )
-            result = cur.fetchone()
-            return result['count'] if result else 0
-    finally:
-        conn.close()
+    with db_cursor() as cur:
+        cur.execute("SELECT COUNT(*) as count FROM briskr.urls WHERE created_by_ip = %s AND disabled_at IS NULL",
+                    (client_ip,))
+        return cur.fetchone()['count']
 
 
 def get_total_urls() -> int:
     """Get total number of URLs in system."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) as count FROM briskr.urls")
-            result = cur.fetchone()
-            return result['count'] if result else 0
-    finally:
-        conn.close()
+    with db_cursor() as cur:
+        cur.execute("SELECT COUNT(*) as count FROM briskr.urls")
+        return cur.fetchone()['count']
 
 
 # ============================================================================
@@ -353,11 +317,18 @@ HTML_TEMPLATE = """
         <h1>Briskr<span> URL Shortener</span></h1>
         <p class="tagline">Making links brisker for: <span>{{ client_ip }}</span>!</p>
         
+        {% if can_create %}
         <form method="POST" action="/shorten">
             <input type="url" name="url" placeholder="Paste long URL here..." required>
-            <input type="text" name="code" placeholder="Custom code (optional)" maxlength="20">
+            <input type="text" name="code" placeholder="Custom code (optional)" maxlength="20" pattern="[A-Za-z0-9_-]+">
             <button type="submit">Shorten</button>
         </form>
+        <p class="total">{{ signed_in }} · <a href="/logout">sign out</a></p>
+        {% elif signed_in %}
+        <p class="tagline">{{ signed_in }} can't create links here. <a href="/logout">Sign out</a></p>
+        {% else %}
+        <p class="tagline"><a href="/login">Sign in with Google</a> to create a link.</p>
+        {% endif %}
         
         {% if result %}
         <div class="result">
@@ -466,17 +437,47 @@ def home():
         your_url_count = 0
         total_urls = 0
     
-    return render_template_string(HTML_TEMPLATE, 
-                                  result=result, 
+    return render_template_string(HTML_TEMPLATE,
+                                  can_create=bool(creator()), signed_in=signed_in_email(),
+                                  result=result,
                                   stats=stats, 
                                   your_url_count=your_url_count,
                                   total_urls=total_urls,
                                   client_ip=client_ip)
 
 
+def signed_in_email() -> str | None:
+    return (session.get('user') or {}).get('email')
+
+
+def creator() -> str | None:
+    """The signed-in email when it may create links, else None."""
+    email = signed_in_email()
+    return email if email in CREATOR_EMAILS else None
+
+
+@app.route("/login")
+def login():
+    return gauth.login()
+
+
+@app.route("/auth/callback")
+def auth_callback():
+    email, error = gauth.handle_callback()
+    return redirect(url_for('home', error=error) if error else url_for('home'))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for('home'))
+
+
 @app.route("/shorten", methods=["POST"])
 def shorten():
     """Create new short URL and redirect (PRG pattern)."""
+    if not creator():
+        return redirect(url_for('home', error='Sign in to create a link'))
     long_url = request.form.get('url', '').strip()
     custom_code = request.form.get('code', '').strip() or None
     client_ip = g.client_ip
@@ -488,7 +489,7 @@ def shorten():
     if not long_url.startswith(('http://', 'https://')):
         long_url = 'https://' + long_url
     
-    result = create_short_url(long_url, custom_code, client_ip)
+    result = create_short_url(long_url, custom_code, client_ip, creator())
     
     if 'error' in result:
         return redirect(url_for('home', error=result['error']))
@@ -502,8 +503,8 @@ def redirect_url(short_code: str):
     """Redirect short URL to long URL."""
     if short_code in ('favicon.ico', 'robots.txt', 'health', 'api'):
         return '', 404
-    
-    long_url = get_long_url(short_code)
+
+    long_url = get_long_url(short_code) if CODE_SHAPE.match(short_code.lower()) else None
     
     if long_url:
         print(f"🔗 Redirect: /{short_code} -> {long_url[:50]}...")
@@ -533,7 +534,9 @@ def redirect_url(short_code: str):
 @app.route("/api/shorten", methods=["POST"])
 def api_shorten():
     """API endpoint for creating short URLs."""
-    data = request.get_json() or {}
+    if not creator():
+        return jsonify({"error": "Sign in at https://bris.kr to create a link"}), 401
+    data = request.get_json(silent=True) or {}
     long_url = data.get('url', '').strip()
     custom_code = data.get('code', '').strip() or None
     client_ip = g.client_ip
@@ -544,8 +547,8 @@ def api_shorten():
     if not long_url.startswith(('http://', 'https://')):
         long_url = 'https://' + long_url
     
-    result = create_short_url(long_url, custom_code, client_ip)
-    return jsonify(result)
+    result = create_short_url(long_url, custom_code, client_ip, creator())
+    return jsonify(result), (400 if 'error' in result else 200)
 
 
 @app.route("/api/stats")
