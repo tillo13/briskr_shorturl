@@ -24,6 +24,8 @@ from utilities.kumori_db import db_cursor  # noqa: E402
 from utilities.google_secrets_utils import get_secret  # noqa: E402
 
 app = Flask(__name__)
+from utilities.csrf_guard import install as install_csrf_guard
+install_csrf_guard(app)  # refuse cross-site POSTs; session cookie SameSite=Lax (audit 2026-10-14)
 
 # GA4 tag injection — registers `ga_snippet(slug)` for use in HTML_TEMPLATE
 try:

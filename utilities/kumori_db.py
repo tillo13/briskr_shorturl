@@ -320,6 +320,11 @@ def _get_connection_pool(gcp_project_id: str) -> psycopg2.pool.ThreadedConnectio
                 logger.info(f"Created IAM-auth connection pool for {gcp_project_id} as {SESSION_ROLE}")
                 return pool
             except Exception as e:
+                # kumori_batch has had no password since 2026-10-12 (#170). The fallback only
+                # ever fired when the database itself was unreachable (the stalls of 10-11 and
+                # 10-12), and then added a second, differently worded failure.
+                if DB_TIER == 'batch':
+                    raise
                 logger.error(f"IAM DB auth failed, falling back to password login: {e}")
 
         if not is_gcp:

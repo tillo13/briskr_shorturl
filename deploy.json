@@ -19,6 +19,10 @@
     {
       "src": "kumori/utilities/google_secrets_utils.py",
       "dst": "utilities/google_secrets_utils.py"
+    },
+    {
+      "src": "spam_control/csrf_guard.py",
+      "dst": "utilities/csrf_guard.py"
     }
   ],
   "venv": "venv_briskr",
